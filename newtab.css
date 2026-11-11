@@ -1,0 +1,137 @@
+/* posts.design's design tokens (--theme-background, --theme-foreground, --theme-muted, --theme-faint,
+   --radius-r-sm, --radius-r-xl, --ease-out), copied so the extension stands on its own. */
+:root {
+  color-scheme: light;
+  --background: #f5f5f5;
+  --foreground: #171717;
+  --muted: #525252;
+  --faint: #6e6e6e;
+  --radius-control: 0.5rem;
+  --radius-media: 1.5rem;
+  --glow-opacity: 0.45;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --chrome: 136px; /* top and bottom padding around the picture; newtab.js reads it */
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #101010;
+    --foreground: #f5f5f5;
+    --muted: #a3a3a3;
+    --faint: #848484;
+    --glow-opacity: 0.7;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; border-radius: var(--radius-control); }
+
+#app {
+  position: relative;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 48px 24px 88px;
+  overflow: hidden;
+}
+.wordmark { color: var(--foreground); font-weight: 500; }
+
+.post { margin: 0; max-width: 100%; opacity: 0; }
+/* newtab.js sets the width: never past the post's own pixels at this screen's density. */
+.post.ready { opacity: 1; }
+.frame { display: grid; line-height: 0; }
+.frame > * { grid-area: 1 / 1; border-radius: var(--radius-media); }
+.picture { display: block; width: 100%; height: auto; position: relative; z-index: 1; }
+
+/* Ambient light: two tiny canvases of the post's colours; a playing video lights the other one every
+   few seconds and it crossfades in. The drift moves the unfiltered wrapper, so each blur is drawn once. */
+.halo { position: relative; z-index: 0; pointer-events: none; transform: scale(1.06); }
+.halo canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  filter: blur(48px) saturate(1.4); opacity: 0; transition: opacity 2400ms ease-in-out;
+}
+.halo canvas.lit { opacity: var(--glow-opacity); }
+
+/* The foot is also the hover zone near the bottom: the credit brightens, the time and See on posts.design appear. */
+.foot {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  height: 112px; padding: 0 24px 22px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 16px;
+  font-size: 13px; color: var(--faint);
+}
+/* Bottom left: the site's identity row (identity-row, standard size): a brand tile or person circle as
+   tall as both lines, the title above the source's @username. Only colour, filter and opacity move. */
+.credit { justify-self: start; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 12px; }
+.avatar {
+  flex: none; width: 40px; height: 40px; object-fit: cover; border-radius: 50%;
+  filter: grayscale(1); transition: filter 200ms var(--ease-out);
+}
+.avatar.brand { border-radius: var(--radius-control); }
+.names { min-width: 0; display: grid; gap: 2px; line-height: 19px; }
+.title, .byline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title { display: block; color: var(--muted); transition: color 300ms ease-out; }
+.when { opacity: 0; transition: opacity 300ms ease-out; }
+.foot:is(:hover, :focus-within) .avatar { filter: none; }
+.foot:is(:hover, :focus-within) .title { color: var(--foreground); }
+.foot:is(:hover, :focus-within) .when { opacity: 1; }
+.open { justify-self: end; display: inline-flex; align-items: center; gap: 8px; color: var(--muted); opacity: 0; transition: opacity 300ms ease-out, color 300ms ease-out; }
+.open:hover { color: var(--foreground); }
+.logo { flex: none; width: 10px; height: 17px; background: currentColor; mask: url("logo.svg") no-repeat center / contain; }
+.foot:is(:hover, :focus-within) .open { opacity: 1; }
+
+/* The site's carousel progress marker (media-carousel CarouselProgress), on the page instead of a picture. */
+.progress { justify-self: center; display: flex; align-items: center; height: 20px; }
+.track { position: relative; display: block; width: 100%; height: 6px; }
+.slot { position: absolute; inset: 0; transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out); }
+.dot { display: block; height: 100%; border-radius: 9999px; background: var(--faint); opacity: 0.45; transition: background-color 300ms ease-out, opacity 300ms ease-out; }
+.slot.active .dot { background: var(--muted); opacity: 1; }
+.foot:hover .slot.active .dot { background: var(--foreground); }
+
+/* Side arrows: the site's carousel arrow (media-carousel, .ui-media-badge), shown when the pointer
+   reaches either side of the screen. The whole side is the target; the frosted disc is the sign.
+   The disc's colours are the badge's fixed over-media values, not theme tokens. */
+.side {
+  position: fixed; top: 0; bottom: 0; z-index: 2; width: clamp(72px, var(--gutter, 12vw), 160px);
+  display: flex; align-items: center; padding: 0 24px; border: 0; background: transparent;
+  color: #f5f5f5; cursor: pointer;
+}
+.side.prev { left: 0; justify-content: flex-start; }
+.side.next { right: 0; justify-content: flex-end; }
+.disc {
+  display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  background-color: rgba(10, 10, 10, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 3px rgba(0, 0, 0, 0.3);
+  opacity: 0; transition: opacity 150ms ease-out;
+}
+.side:hover .disc, .side:focus-visible .disc { opacity: 1; backdrop-filter: blur(14px) saturate(1.3); }
+.side:focus-visible { outline: none; }
+.side:focus-visible .disc { box-shadow: 0 0 0 2px rgb(255 255 255 / 0.9), 0 0 0 3.5px rgb(0 0 0 / 0.4); }
+.prev svg { transform: rotate(180deg); }
+
+@media (hover: none) {
+  .disc { opacity: 1; }
+  .avatar { filter: none; }
+  .when, .open { opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .post.ready { transition: opacity 200ms ease-out; }
+  .halo { animation: drift 16s ease-in-out infinite alternate; }
+  @keyframes drift { from { transform: scale(1.04); } to { transform: scale(1.12) translateY(1.5%); } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .slot { transition: opacity 200ms ease-out; }
+}
+@media (max-width: 640px) {
+  #app { padding: 24px 16px 88px; }
+  .foot { padding: 0 16px 16px; grid-template-columns: minmax(0, 1fr) auto; }
+  .progress { display: none; }
+}
