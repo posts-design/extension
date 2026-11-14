@@ -1,106 +1,274 @@
-/* posts.design's design tokens (--theme-background, --theme-foreground, --theme-muted, --theme-faint,
-   --radius-r-sm, --radius-r-xl, --ease-out), copied so the extension stands on its own. */
+/* posts.design's design tokens, copied so the extension stands on its own. --surface is the site's
+   floating surface (its dialog colour) for Settings. theme.js sets data-theme before the page paints:
+   the reader's choice in Settings, or the system's. */
 :root {
   color-scheme: light;
   --background: #f5f5f5;
   --foreground: #171717;
   --muted: #525252;
   --faint: #6e6e6e;
+  --selected-text: #383838;
   --radius-control: 0.5rem;
   --radius-media: 1.5rem;
-  --glow-opacity: 0.45;
+  --glow-opacity: 0.2;
+  --wash-opacity: 0.16;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --chrome: 136px; /* top and bottom padding around the picture; newtab.js reads it */
+  --ease-soft: cubic-bezier(0.33, 1, 0.68, 1); /* the new tab's own: Previous and the dots, gentler than --ease-out */
+  --chrome: 104px; /* top and bottom padding around the picture; newtab.js reads it */
+  --surface: #fafafa;
+  --border: rgba(23, 23, 23, 0.1);
+  --shadow: rgba(23, 23, 23, 0.08);
+  --accent-bg: rgba(23, 23, 23, 0.06);
+  --focus-ring: rgba(23, 23, 23, 0.16);
+  /* The site's switch (tokens.css --theme-input, -border-strong, -subtle, -selected-bg, -accent-solid-hover). */
+  --input: rgba(255, 255, 255, 0.8);
+  --border-strong: rgba(23, 23, 23, 0.18);
+  --subtle: #666666;
+  --selected-bg: #ebebeb;
+  --solid-hover: #404040;
+  /* Rows in the menu nest in its 24px corner, less its 8px inset; plain round corners run smaller than
+     the site's smoothed ones (tokens.css --ui-control-corner-scale). */
+  --row-corner: 16px;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --background: #101010;
-    --foreground: #f5f5f5;
-    --muted: #a3a3a3;
-    --faint: #848484;
-    --glow-opacity: 0.7;
-  }
+@supports not (corner-shape: superellipse(1.6)) {
+  :root { --row-corner: 11px; }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #101010;
+  --foreground: #f5f5f5;
+  --muted: #a3a3a3;
+  --faint: #848484;
+  --selected-text: #f5f5f5;
+  --glow-opacity: 0.16;
+  --surface: #171717;
+  --border: rgba(255, 255, 255, 0.1);
+  --shadow: rgba(0, 0, 0, 0.34);
+  --accent-bg: rgba(245, 245, 245, 0.08);
+  --focus-ring: rgba(245, 245, 245, 0.16);
+  --input: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --subtle: #8a8a8a;
+  --selected-bg: rgba(255, 255, 255, 0.14);
+  --solid-hover: #e5e5e5;
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html, body { height: 100%; margin: 0; }
+/* Swipes step between posts (newtab.js), so Chrome's swipe back and sideways panning are off. */
+html, body { height: 100%; margin: 0; overscroll-behavior-x: none; }
 body {
   background: var(--background);
   color: var(--foreground);
   font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 a { color: inherit; text-decoration: none; }
-a:hover { text-decoration: underline; text-underline-offset: 3px; }
 :focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; border-radius: var(--radius-control); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 #app {
   position: relative;
   min-height: 100%;
   display: grid;
   place-items: center;
-  padding: 48px 24px 88px;
+  padding: 48px 24px 56px;
   overflow: hidden;
+  touch-action: pan-y pinch-zoom;
 }
 .wordmark { color: var(--foreground); font-weight: 500; }
 
-.post { margin: 0; max-width: 100%; opacity: 0; }
-/* newtab.js sets the width: never past the post's own pixels at this screen's density. */
+/* newtab.js sets the width: about the same share of the room for every post. It shows the post
+   (.ready) once it has a frame; the post before shares its cell while it fades out (.leaving). The whole
+   post is one link to its page on posts.design. */
+.post { position: relative; grid-area: 1 / 1; margin: 0; max-width: 100%; opacity: 0; }
 .post.ready { opacity: 1; }
+.post.leaving { opacity: 0; pointer-events: none; }
 .frame { display: grid; line-height: 0; }
 .frame > * { grid-area: 1 / 1; border-radius: var(--radius-media); }
 .picture { display: block; width: 100%; height: auto; position: relative; z-index: 1; }
 
-/* Ambient light: two tiny canvases of the post's colours; a playing video lights the other one every
-   few seconds and it crossfades in. The drift moves the unfiltered wrapper, so each blur is drawn once. */
-.halo { position: relative; z-index: 0; pointer-events: none; transform: scale(1.06); }
-.halo canvas {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  filter: blur(48px) saturate(1.4); opacity: 0; transition: opacity 2400ms ease-in-out;
+/* The wall's media overlay (post-media-frame.tsx AuthorAvatar and PostedDateChip, media-chrome.css,
+   owner 2026-11-13), shown while the pointer is over the post. Its frosted badge is the site's
+   .ui-media-badge, over the picture in fixed colours whatever the theme. */
+.badge {
+  background-color: rgba(10, 10, 10, 0.4); color: #f5f5f5;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 3px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(14px) saturate(1.3);
 }
-.halo canvas.lit { opacity: var(--glow-opacity); }
-
-/* The foot is also the hover zone near the bottom: the credit brightens, the time and See on posts.design appear. */
-.foot {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
-  height: 112px; padding: 0 24px 22px;
-  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 16px;
-  font-size: 13px; color: var(--faint);
+/* Top right, when it went out: the site's .ui-media-chip. */
+.posted {
+  position: absolute; top: 12px; right: 12px; z-index: 2; padding: 4px 10px; border-radius: 9999px;
+  font-size: 11px; font-weight: 600; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase;
+  pointer-events: none; opacity: 0; transition: opacity 150ms;
 }
-/* Bottom left: the site's identity row (identity-row, standard size): a brand tile or person circle as
-   tall as both lines, the title above the source's @username. Only colour, filter and opacity move. */
-.credit { justify-self: start; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 12px; }
+/* Bottom left, the author pill: at rest the frosted surface shows only around the avatar; it opens to the
+   right as the @username follows, and the avatar takes its colour. A brand leads with its logo's
+   rounded square, and the pill rounds 2px outside it. A person posting for a brand fans out from under
+   the brand's avatar on a small-overshoot spring, overlapping it by 8px. */
+.pill {
+  --pill-radius: 9999px;
+  position: absolute; left: 12px; bottom: 12px; z-index: 2; display: flex; align-items: center; gap: 8px;
+  max-width: calc(100% - 24px); height: 36px; padding: 2px; border-radius: var(--pill-radius); color: #f5f5f5;
+  pointer-events: none; opacity: 0; transition: opacity 150ms;
+}
+.pill.brand { --pill-radius: 10px; }
+.pill-surface {
+  position: absolute; inset: 0; border-radius: var(--pill-radius);
+  clip-path: inset(0 calc(100% - 36px) 0 0 round var(--pill-radius)); transition: clip-path 180ms var(--ease-out);
+}
 .avatar {
-  flex: none; width: 40px; height: 40px; object-fit: cover; border-radius: 50%;
+  position: relative; z-index: 1; flex: none; display: grid; place-items: center; width: 32px; height: 32px;
+  border-radius: 50%; object-fit: cover; background: #262626; color: #fff; font-size: 11px; font-weight: 700;
   filter: grayscale(1); transition: filter 200ms var(--ease-out);
 }
-.avatar.brand { border-radius: var(--radius-control); }
-.names { min-width: 0; display: grid; gap: 2px; line-height: 19px; }
-.title, .byline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.title { display: block; color: var(--muted); transition: color 300ms ease-out; }
-.when { opacity: 0; transition: opacity 300ms ease-out; }
-.foot:is(:hover, :focus-within) .avatar { filter: none; }
-.foot:is(:hover, :focus-within) .title { color: var(--foreground); }
-.foot:is(:hover, :focus-within) .when { opacity: 1; }
-.open { justify-self: end; display: inline-flex; align-items: center; gap: 8px; color: var(--muted); opacity: 0; transition: opacity 300ms ease-out, color 300ms ease-out; }
-.open:hover { color: var(--foreground); }
-.logo { flex: none; width: 10px; height: 17px; background: currentColor; mask: url("logo.svg") no-repeat center / contain; }
-.foot:is(:hover, :focus-within) .open { opacity: 1; }
+.pill.brand .lead { border-radius: var(--radius-control); corner-shape: superellipse(1.6); }
+.pill:has(.by) .lead { box-shadow: 0 0 0 2px rgba(10, 10, 10, 0.6); }
+.avatar.by {
+  z-index: 5; margin-left: -16px; opacity: 0; transform: translate3d(-20px, 0, 0) scale(0.8);
+  transition: opacity 100ms ease, transform 480ms linear(0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%, 0.849 31.5%, 0.937 38.1%, 0.968 41.8%, 0.991 45.7%, 1.006 50.1%, 1.015 55%, 1.017 63.9%, 1.001 85.9%, 1), filter 200ms var(--ease-out);
+}
+.who {
+  position: relative; z-index: 1; min-width: 0; padding-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; font-weight: 600; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase;
+  opacity: 0; transform: translate3d(-4px, 0, 0); transition: opacity 120ms ease 35ms, transform 160ms var(--ease-out) 20ms;
+}
+.post:is(:hover, :has(:focus-visible)) :is(.pill, .posted) { opacity: 1; }
+.post:is(:hover, :has(:focus-visible)) .pill-surface { clip-path: inset(0 round var(--pill-radius)); }
+.post:is(:hover, :has(:focus-visible)) :is(.who, .avatar.by) { opacity: 1; transform: none; }
+.post:is(:hover, :has(:focus-visible)) .avatar { filter: none; }
 
-/* The site's carousel progress marker (media-carousel CarouselProgress), on the page instead of a picture. */
-.progress { justify-self: center; display: flex; align-items: center; height: 20px; }
-.track { position: relative; display: block; width: 100%; height: 6px; }
-.slot { position: absolute; inset: 0; transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out); }
-.dot { display: block; height: 100%; border-radius: 9999px; background: var(--faint); opacity: 0.45; transition: background-color 300ms ease-out, opacity 300ms ease-out; }
-.slot.active .dot { background: var(--muted); opacity: 1; }
-.foot:hover .slot.active .dot { background: var(--foreground); }
+/* Ambient light, as the breakdown kit's (kits/breakdown/lib/light.mjs, kept by the owner 2026-11-12): a
+   faint tint off the picture's edges, never a second picture. Two layers of the post's colours; a
+   playing video lights the other one every few seconds and it crossfades in, so a cut eases in. The halo
+   fades out over its lower part, stopping just below the picture. It is blurred far (owner, 2026-11-12),
+   so it melts into the room's light instead of tracing the frame; the 200px margin holds the whole blur
+   (newtab.js HALO_MARGIN). newtab.js paints the blur into each canvas, so no filter runs here. */
+.halo {
+  position: relative; z-index: 0; pointer-events: none; margin: -200px;
+  mask: linear-gradient(to bottom, #000 calc(100% - 380px), transparent calc(100% - 184px));
+}
+.halo canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; transition: opacity 2400ms ease-in-out;
+}
+/* In dark mode the bright parts are capped (#cap in newtab.html), so a sky or white type doesn't lead and
+   the light takes the deeper colours. It can only add light: the room already lifts the page, so a dark
+   post's own colours drawn over it would read as a shadow around the frame. */
+[data-theme="dark"] .halo { mix-blend-mode: screen; }
+[data-theme="dark"] .halo .day, :root:not([data-theme="dark"]) .halo .night { display: none; }
+.halo canvas.lit { opacity: var(--glow-opacity); }
+
+/* The room (owner, 2026-11-12, from the glow board's Room tint with the Tint background): behind
+   everything. Light mode: the post's colours washed across the page, uneven like real light, over a
+   flat tone of its average colour whose blend keeps only its hue and some saturation, so the page keeps
+   its lightness and never greys. Dark mode (owner, 2026-11-13): no tone and no wash, only the post's
+   peaks (newtab.js), capped and added as light, so the page stays black but where the post is bright,
+   and there only just. newtab.js paints their blur and colour and sets each crossfade's length. */
+.tone, .wash, .peak { position: fixed; pointer-events: none; opacity: 0; transition: opacity 2400ms ease-in-out; }
+.tone { inset: 0; width: 100%; height: 100%; mix-blend-mode: color; }
+.tone.lit { opacity: 0.7; }
+.wash { left: -10%; top: -10%; width: 120%; height: 120%; }
+.wash.lit { opacity: var(--wash-opacity); }
+.peak { display: none; left: -10%; top: -10%; width: 120%; height: 120%; mix-blend-mode: screen; }
+.peak.lit { opacity: 0.22; }
+[data-theme="dark"] :is(.tone, .wash) { display: none; }
+[data-theme="dark"] .peak { display: block; }
+
+/* The top is the hover zone for the top right: Copy for agent and the Settings gear rest faint, brighten
+   when the pointer nears the top, and take full colour under it. */
+.top {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 3; height: 64px; padding: 16px;
+  display: flex; justify-content: flex-end; align-items: flex-start; gap: 8px;
+}
+.chip {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px 0 10px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 9999px;
+  background: transparent; color: var(--faint); font: inherit; font-size: 13px; line-height: 1;
+  cursor: pointer; opacity: 0.5; transition: opacity 300ms ease-out, color 300ms ease-out;
+}
+.chip.icon { width: 32px; padding: 0; }
+.top:is(:hover, :focus-within) .chip { opacity: 1; color: var(--muted); }
+.top .chip:is(:hover, :focus-visible) { color: var(--foreground); }
+.chip:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+/* The three labels share one cell, so the button keeps its width as it says Copied. */
+.labels { display: grid; }
+.labels > * { grid-area: 1 / 1; }
+.copy .copied, .copy .failed, .copy[data-state] .label:first-child { visibility: hidden; }
+.copy[data-state="copied"] .copied, .copy[data-state="failed"] .failed { visibility: visible; }
+/* While Settings is open the top stays lit and the gear reads as pressed. */
+.top:has(.panel:popover-open) .chip { opacity: 1; color: var(--muted); }
+.top:has(.panel:popover-open) .chip.icon { color: var(--foreground); }
+
+/* Settings (owner, 2026-11-13): the site menu's floating surface (.siteMenu, .ui-popup-surface) under the
+   gear, with its About row, its theme row and its Socials row (site-menu-content.tsx, site/menu.css). A
+   native popover: it closes on Escape or a click outside, and focus returns to the gear. */
+.panel {
+  position: fixed; inset: 56px 16px auto auto; margin: 0; width: min(292px, calc(100vw - 24px)); padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent); border-radius: 24px; corner-shape: superellipse(1.6);
+  background: var(--surface); color: var(--foreground); box-shadow: 0 24px 80px var(--shadow);
+  font-size: 15px; line-height: 1.25; transform-origin: top right;
+}
+[data-theme="dark"] .panel { border-color: color-mix(in srgb, var(--border) 80%, transparent); }
+.panel :is(.row, .theme, .social) { border-radius: var(--row-corner); corner-shape: superellipse(1.6); }
+.row { display: flex; align-items: center; min-height: 40px; padding: 0 12px; }
+.row:is(:hover, :focus-visible), .social:is(:hover, :focus-visible) { background: var(--accent-bg); }
+/* A preference row, as the site's SwitchField: the label on the left, the switch on the right. */
+.row.preference { justify-content: space-between; gap: 24px; min-height: 44px; cursor: pointer; }
+.row.preference:hover { background: none; }
+/* The site's switch (ui/switch.tsx): a 40 by 24 outlined track whose 18px thumb moves 16px when on. */
+.switch {
+  appearance: none; flex: none; display: inline-flex; align-items: center; width: 40px; height: 24px; margin: 0; padding: 2px;
+  border: 1px solid var(--border-strong); border-radius: 999px; background: var(--input); cursor: pointer;
+}
+.switch::before { content: ""; width: 18px; height: 18px; border-radius: 50%; background: var(--subtle); }
+.preference:hover .switch { border-color: var(--foreground); }
+.switch:active { background: var(--selected-bg); }
+.switch:checked { border-color: var(--foreground); background: var(--foreground); }
+.switch:checked:active { background: var(--solid-hover); }
+.switch:checked::before { translate: 16px 0; background: var(--background); }
+.switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 999px; }
+/* This week's picks while Explorations is on: it only applies to the picks. */
+.row.preference:has(.switch:disabled) { opacity: 0.5; cursor: default; }
+.switch:disabled, .preference:has(.switch:disabled):hover .switch { cursor: default; border-color: var(--border-strong); }
+.themes, .socials { display: flex; align-items: center; gap: 4px; min-height: 54px; padding: 7px 6px; }
+.themes { margin-top: 2px; }
+.theme { position: relative; flex: 1; display: grid; place-items: center; height: 38px; color: var(--muted); cursor: pointer; }
+.theme input { position: absolute; opacity: 0; pointer-events: none; }
+.theme:hover { background: var(--accent-bg); color: var(--foreground); }
+.theme:has(:checked) { background: color-mix(in srgb, var(--foreground) 7%, var(--surface)); color: var(--selected-text); }
+.theme:has(:focus-visible) { box-shadow: 0 0 0 2px var(--focus-ring); }
+.socials { padding-inline: 12px; }
+.socials-label { margin-right: auto; color: var(--muted); }
+.social { display: grid; place-items: center; width: 38px; height: 38px; }
+.social img { width: 14px; height: 14px; object-fit: contain; }
+.social img.linkedin { width: 16px; height: 16px; translate: 0 -1px; }
+/* Each glyph comes drawn for a light and a dark page, as on the site (social-glyphs.css). */
+[data-theme="dark"] .social .on-light, :root:not([data-theme="dark"]) .social .on-dark { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .panel { transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out), overlay 160ms allow-discrete, display 160ms allow-discrete; }
+  .panel:not(:popover-open) { opacity: 0; transform: scale(0.96); }
+  .switch { transition: background-color 150ms var(--ease-out), border-color 150ms var(--ease-out); }
+  .switch::before { transition: background-color 150ms var(--ease-out), translate 150ms var(--ease-out); }
+  @starting-style { .panel:popover-open { opacity: 0; transform: scale(0.96); } }
+}
+
+/* The site's carousel progress marker (media-carousel CarouselProgress), alone at the bottom centre as on a
+   listing's photos: the pill solid, the other dots dimmer, all in one fill. It is wide enough for the pill
+   with two dots and a small one on each side (newtab.js progressMarker). */
+.marker { position: absolute; left: 50%; bottom: 12px; z-index: 3; translate: -50% 0; display: flex; width: 75px; height: 5px; }
+.marker-track { position: relative; display: block; width: 100%; height: 5px; }
+/* The dots glide (owner, 2026-11-12): a touch slower than the picture's nudge and on a soft curve, so the
+   marker settles just after the post. */
+.slot { position: absolute; top: 0; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; transition: transform 420ms var(--ease-soft), opacity 420ms var(--ease-soft); }
+.slot.active { width: 15px; margin-left: -7.5px; }
+.dot { display: block; width: 100%; height: 100%; border-radius: 9999px; background: var(--foreground); opacity: 0.35; }
+.slot.active .dot { opacity: 0.9; }
 
 /* Side arrows: the site's carousel arrow (media-carousel, .ui-media-badge), shown when the pointer
    reaches either side of the screen. The whole side is the target; the frosted disc is the sign.
    The disc's colours are the badge's fixed over-media values, not theme tokens. */
 .side {
-  position: fixed; top: 0; bottom: 0; z-index: 2; width: clamp(72px, var(--gutter, 12vw), 160px);
+  position: fixed; top: 0; bottom: 0; z-index: 2; width: clamp(72px, var(--gutter, 12vw), 200px);
   display: flex; align-items: center; padding: 0 24px; border: 0; background: transparent;
   color: #f5f5f5; cursor: pointer;
 }
@@ -117,21 +285,51 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .side:focus-visible .disc { box-shadow: 0 0 0 2px rgb(255 255 255 / 0.9), 0 0 0 3.5px rgb(0 0 0 / 0.4); }
 .prev svg { transform: rotate(180deg); }
 
+/* A touchscreen never hovers, so it shows the overlay, both avatars and the top at rest. */
 @media (hover: none) {
-  .disc { opacity: 1; }
+  .disc, .chip { opacity: 1; }
+  :is(.pill, .posted, .who, .avatar.by) { opacity: 1; transform: none; }
+  .pill-surface { clip-path: inset(0 round var(--pill-radius)); }
   .avatar { filter: none; }
-  .when, .open { opacity: 1; }
-}
-@media (prefers-reduced-motion: no-preference) {
-  .post.ready { transition: opacity 200ms ease-out; }
-  .halo { animation: drift 16s ease-in-out infinite alternate; }
-  @keyframes drift { from { transform: scale(1.04); } to { transform: scale(1.12) translateY(1.5%); } }
 }
 @media (prefers-reduced-motion: reduce) {
+  .post.ready { transition: opacity 200ms ease-out; }
+  .post.leaving { transition-duration: 160ms; }
+  .pill-surface, .who, .avatar.by { transition: none; }
   .slot { transition: opacity 200ms ease-out; }
 }
+/* Entrances (owner, 2026-11-12). Opening a tab unveils the post: it opens from an 84% window to its own
+   corners, with the fade on a gentler curve than the window so the first frames don't flash, and the
+   dots and top follow. An arrow pulls focus like a lens: the post before softens and recedes as the new
+   one comes into focus from 2% closer (Next, 460ms), or from just behind, slower (Previous, 540ms), while
+   the light hands over in 800ms. Reduced motion keeps the 200ms fade.
+   Opening a post (owner, 2026-11-13, .departing from newtab.js): everything around it fades and the post
+   comes a little closer while posts.design loads its page. */
+@media (prefers-reduced-motion: no-preference) {
+  .post.ready[data-enter="open"] .picture { animation: unveil-window 640ms var(--ease-out) both, unveil-fade 420ms ease-out both; }
+  .post.ready[data-enter="next"] .picture { --from: 1.02; animation: focus-in 460ms var(--ease-out) both; }
+  .post.ready[data-enter="prev"] .picture { --from: 0.985; animation: focus-in 540ms var(--ease-soft) both; }
+  .post.ready.leaving:is([data-leave="next"], [data-leave="prev"]) { opacity: 1; }
+  .post.leaving[data-leave="next"] .picture { --to: 0.985; animation: focus-out 322ms var(--ease-soft) both; }
+  .post.leaving[data-leave="prev"] .picture { --to: 1.02; animation: focus-out 378ms var(--ease-soft) both; }
+  .post.leaving .halo { opacity: 0; transition: opacity 800ms ease-in-out; }
+  .post:is([data-enter="next"], [data-enter="prev"]) .halo:not(.warm) canvas { transition-duration: 800ms; }
+  #app:not(.opened) :is(.marker, .top) { opacity: 0; }
+  #app.opened .top { animation: unveil-fade 350ms ease-out 300ms both; }
+  #app.opened .marker { animation: rise 350ms var(--ease-out) 300ms both; }
+  #app.departing :is(.top, .marker, .side, .pill, .posted) { opacity: 0; transition: opacity 160ms ease-out; animation: none; }
+  #app.departing .post .frame { transform: scale(1.03); transition: transform 700ms var(--ease-out); }
+  body:has(#app.departing) :is(.tone, .wash, .peak) { opacity: 0; transition: opacity 400ms ease-out; }
+}
+@keyframes unveil-window {
+  from { clip-path: inset(8% round calc(var(--radius-media) + 19px)); }
+  to { clip-path: inset(0 round var(--radius-media)); }
+}
+@keyframes unveil-fade { from { opacity: 0; } }
+@keyframes focus-in { from { opacity: 0; filter: blur(14px); transform: scale(var(--from)); } }
+@keyframes focus-out { to { opacity: 0; filter: blur(10px); transform: scale(var(--to)); } }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 @media (max-width: 640px) {
-  #app { padding: 24px 16px 88px; }
-  .foot { padding: 0 16px 16px; grid-template-columns: minmax(0, 1fr) auto; }
-  .progress { display: none; }
+  #app { padding: 24px 16px 56px; }
+  .marker { display: none; }
 }
