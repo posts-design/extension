@@ -137,6 +137,48 @@ a { color: inherit; text-decoration: none; }
 .post:is(:hover, :has(:focus-visible)) :is(.who, .avatar.by) { opacity: 1; transform: none; }
 .post:is(:hover, :has(:focus-visible)) .avatar { filter: none; }
 
+/* A carousel post's slides (newtab.js slideshow), as the site's wall carousel (post-asset-carousel.tsx,
+   media-chrome.css): slides 8px apart in a frame of the first slide's shape, cropped to it unless far
+   from it, on the page's colour; the incoming slide settles 10px in the direction of travel. */
+.picture.slides { overflow: hidden; background: var(--background); }
+.slide-track { display: flex; gap: 8px; height: 100%; transition: transform 420ms var(--ease-out); }
+.slide-track.jump { transition: none; }
+.slide { flex: 0 0 100%; height: 100%; overflow: hidden; border-radius: var(--radius-media); }
+.slide-image { display: block; width: 100%; height: 100%; object-fit: cover; }
+.slide-image.whole { object-fit: contain; }
+@media (prefers-reduced-motion: no-preference) {
+  .slides[data-direction="next"] .slide.current .slide-image { animation: slide-settle-next 480ms var(--ease-out) both; }
+  .slides[data-direction="previous"] .slide.current .slide-image { animation: slide-settle-previous 480ms var(--ease-out) both; }
+}
+@keyframes slide-settle-next { from { opacity: 0.88; transform: translateX(10px) scale(1.015); } }
+@keyframes slide-settle-previous { from { opacity: 0.88; transform: translateX(-10px) scale(1.015); } }
+@media (prefers-reduced-motion: reduce) { .slide-track { transition: none; } }
+/* Over the picture, outside its link: the wall's arrows, 12px in and centred, shown while the pointer is
+   on the post (hovering one hides the other), and its marker 12px from the bottom right. */
+.slide-controls { position: absolute; inset: 0; z-index: 4; pointer-events: none; border-radius: var(--radius-media); }
+.slide-arrow {
+  position: absolute; top: 50%; translate: 0 -50%; display: grid; place-items: center; width: 36px; height: 36px;
+  padding: 0; border: 0; border-radius: 50%; color: #fff; cursor: pointer; pointer-events: auto;
+  background-color: rgba(10, 10, 10, 0.4); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 3px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(14px) saturate(1.3); opacity: 0; transition: opacity 150ms ease-out;
+}
+.slide-arrow.prev { left: 12px; }
+.slide-arrow.next { right: 12px; }
+.slide-arrow.prev svg { transform: rotate(180deg); }
+.post:not(.leaving):hover .slide-arrow, .slide-arrow:focus-visible { opacity: 1; }
+.slide-controls:has(.slide-arrow:hover) .slide-arrow:not(:hover) { opacity: 0; }
+.slide-arrow:focus-visible { outline: none; box-shadow: 0 0 0 2px rgb(255 255 255 / 0.9), 0 0 0 3.5px rgb(0 0 0 / 0.4); }
+.slide-marker { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; height: 36px; max-width: 40%; }
+.slide-dots { position: relative; display: block; width: 100%; height: 6px; }
+.slide-dot { position: absolute; top: 0; left: 0; width: 6px; height: 6px; transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out); }
+.slide-dot.active { width: 18px; }
+.slide-dot > span {
+  display: block; width: 100%; height: 100%; box-sizing: border-box; border-radius: 9999px;
+  border: 1px solid rgba(0, 0, 0, 0.55); background-color: rgba(255, 255, 255, 0.85); transition: scale 200ms var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) { .slide-dot, .slide-dot > span { transition: opacity 200ms ease-out; } }
+@media (hover: none) { .slide-arrow { opacity: 1; } }
+
 /* Ambient light, as the breakdown kit's (kits/breakdown/lib/light.mjs, kept by the owner 2026-11-12): a
    faint tint off the picture's edges, never a second picture. Two layers of the post's colours; a
    playing video lights the other one every few seconds and it crossfades in, so a cut eases in. The halo

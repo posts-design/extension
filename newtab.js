@@ -7,6 +7,9 @@ const FEED_URL = "https://posts.design/feed/new-tab.xml";
 // The Explorations wall, independent designers' posts newest first, for Settings' Explorations switch
 // (owner, 2026-11-14), read and kept the same way.
 const EXPLORATIONS_URL = "https://posts.design/feed/explorations.xml";
+// The newest posts on posts.design (the Recent wall's public feed), the last top-up when the picks and
+// the recent Explorations come to fewer than six.
+const LATEST_URL = "https://posts.design/feed.xml";
 const SITE_HOST = "posts.design";
 const SITE_URL = "https://posts.design/";
 const CAMPAIGN = { utm_source: "chrome-extension", utm_medium: "referral" };
@@ -26,7 +29,9 @@ const EXPLORATIONS_KEY = "posts-design-newtab:explorations:v1"; // true when Set
 const FEEDS = {
   picks: { url: FEED_URL, key: FEED_KEY },
   explorations: { url: EXPLORATIONS_URL, key: "posts-design-newtab:feed:explorations:v1" },
+  latest: { url: LATEST_URL, key: "posts-design-newtab:feed:latest:v1" },
 };
+const MIN_POSTS = 6;
 const REFRESH_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ATOM_NS = "http://www.w3.org/2005/Atom";
@@ -100,12 +105,18 @@ function parseFeed(text) {
     const image = siteUrl(thumbnail?.getAttribute("url") ?? "");
     const published = Date.parse(text(ATOM_NS, "published"));
     if (!post || !image || Number.isNaN(published)) return [];
-    const video = content?.getAttribute("type")?.startsWith("video/") ? siteUrl(content.getAttribute("url") ?? "") : null;
+    // A carousel's slides (2 or more), as the wall's carousel shows them: the first is its still and shape.
+    const slides = [...entry.getElementsByTagNameNS(POSTS_NS, "slide")].flatMap((node) => {
+      const src = siteUrl(node.getAttribute("url") ?? ""), dims = size(node);
+      return src && dims ? [{ src, ...dims }] : [];
+    });
+    const carousel = slides.length >= 2 ? slides : null;
+    const video = !carousel && content?.getAttribute("type")?.startsWith("video/") ? siteUrl(content.getAttribute("url") ?? "") : null;
     const postedAt = Date.parse(text(POSTS_NS, "postedAt"));
     return [{
-      post, image, published,
+      post, image: carousel?.[0].src ?? image, published, slides: carousel,
       postedAt: Number.isNaN(postedAt) ? published : postedAt,
-      size: (video && size(content)) || size(thumbnail),
+      size: (carousel && { width: carousel[0].width, height: carousel[0].height }) || (video && size(content)) || size(thumbnail),
       video,
       source: httpsUrl(link("via"))?.href ?? null,
       title: text(POSTS_NS, "title") || text(ATOM_NS, "title"),
@@ -142,22 +153,27 @@ function feedMode() {
   return storage.read(EXPLORATIONS_KEY) === true ? "explorations" : "picks";
 }
 
+/** The picks from the last 24 hours, or from the last 7 days with Settings' This week's picks on (owner, 2026-11-14). */
+function picked(entries) {
+  const now = Date.now(), span = storage.read(WEEK_KEY) === true ? 7 * DAY_MS : DAY_MS;
+  return entries.filter((entry) => now - entry.published < span);
+}
+
 /**
- * The picks from the last 24 hours, or from the last 7 days with Settings' This week's picks on
- * (owner, 2026-11-14); or else those from the most recent day that had any. Explorations: the last
- * 2 days', and never fewer than the 6 newest (owner, 2026-11-14).
+ * The posts a tab turns through, never fewer than six (owner, 2026-11-14). The picks: those picked()
+ * finds, topped up when there are fewer than six with the Explorations of the last 2 days, then the
+ * newest posts on posts.design, then older picks, each post once and in that order. Explorations: the
+ * last 2 days', and never fewer than the 6 newest.
  */
 function featured(entries, source) {
-  const now = Date.now();
-  if (source === "explorations") {
-    const lastTwoDays = entries.filter((entry) => now - entry.published < 2 * DAY_MS).length;
-    return entries.slice(0, Math.max(lastTwoDays, 6));
-  }
-  const span = storage.read(WEEK_KEY) === true ? 7 * DAY_MS : DAY_MS;
-  const recent = entries.filter((entry) => now - entry.published < span);
-  if (recent.length || !entries.length) return recent;
-  const newest = new Date(entries[0].published).toDateString();
-  return entries.filter((entry) => new Date(entry.published).toDateString() === newest);
+  const now = Date.now(), recently = (entry) => now - entry.published < 2 * DAY_MS;
+  if (source === "explorations") return entries.slice(0, Math.max(entries.filter(recently).length, MIN_POSTS));
+  const recent = picked(entries);
+  if (recent.length >= MIN_POSTS) return recent;
+  const explorations = (keptFeed("explorations")?.entries ?? []).filter(recently);
+  const latest = keptFeed("latest")?.entries ?? [];
+  const shown = new Set();
+  return [...recent, ...explorations, ...latest, ...entries].filter((entry) => !shown.has(entry.post) && shown.add(entry.post)).slice(0, MIN_POSTS);
 }
 
 function el(tag, props = {}, children = []) {
@@ -440,6 +456,7 @@ function halo(sampled) {
  * 2026-11-13): the whole post opens its page, where the site's player is.
  */
 function media(post, light, loaded, failed) {
+  if (post.slides) return slideshow(post, light, loaded, failed);
   const label = post.alt || post.title;
   if (!post.video) {
     const picture = el("img", { className: "picture", alt: label, decoding: "async" });
@@ -467,6 +484,113 @@ function media(post, light, loaded, failed) {
   video.src = post.video;
   const timer = still ? 0 : setInterval(() => { if (!video.paused) light.sample(video); }, SAMPLE_EVERY_MS);
   return { node: video, stop() { clearInterval(timer); video.removeAttribute("src"); video.load(); } };
+}
+
+/**
+ * A carousel post's slides, as the site's wall carousel (post-asset-carousel.tsx, owner 2026-11-14):
+ * the first slide sets the frame's shape, and a slide far from it (over 1.5x) shows whole rather than
+ * cropped to a sliver. Over the picture, the wall's arrows (Previous only past the first slide; hovering
+ * one hides the other) and its progress marker bottom right. It loops, the incoming slide settles in
+ * the direction of travel, and it turns by itself every 8 seconds until someone moves it, never while
+ * the pointer or focus is on the post, the tab is hidden, or motion is reduced. Each slide lights the
+ * room as it comes. A two-finger swipe over the post moves through the slides first (`move`).
+ */
+const SLIDE_EVERY_MS = 8000, SLIDE_GAP = 8;
+function slideshow(post, light, loaded, failed) {
+  const slides = post.slides, total = slides.length, aspect = slides[0].width / slides[0].height;
+  const label = post.alt || post.title;
+  const images = slides.map((slide, i) => {
+    const own = slide.width / slide.height, whole = Math.max(own / aspect, aspect / own) > 1.5;
+    return el("img", { className: `slide-image${whole ? " whole" : ""}`, alt: i ? "" : label, decoding: "async", loading: i < 2 ? "eager" : "lazy", src: slide.src });
+  });
+  const frames = images.map((image) => el("span", { className: "slide" }, [image]));
+  const track = el("span", { className: "slide-track" }, frames);
+  const node = el("span", { className: "picture slides" }, [track]);
+  node.style.aspectRatio = `${slides[0].width} / ${slides[0].height}`;
+  images[0].onload = () => { fit(); light.sample(images[0]); loaded(); };
+  images[0].onerror = failed;
+
+  const arrow = (direction, text) => el("button", { type: "button", className: `slide-arrow ${direction}`, ariaLabel: text }, [chevron()]);
+  const prev = arrow("prev", "Previous image"), next = arrow("next", "Next image"), marker = slideMarker(total);
+  const controls = el("div", { className: "slide-controls" }, [prev, next, marker.node]);
+  let index = 0, moved = false;
+
+  function go(to, direction, lights = true) {
+    const wrap = (to + total) % total !== to;
+    index = (to + total) % total;
+    // A wrap jumps straight to the far slide, which then settles in as any other does.
+    track.classList.toggle("jump", wrap);
+    track.style.transform = `translateX(calc(${-index} * (100% + ${SLIDE_GAP}px)))`;
+    node.dataset.direction = direction;
+    frames.forEach((frame, i) => frame.classList.toggle("current", i === index));
+    // Restart the settle on the new slide.
+    const image = images[index];
+    image.style.animation = "none";
+    void image.offsetWidth;
+    image.style.animation = "";
+    if (!lights) { /* The first slide lights the room as the post opens (its onload). */ }
+    else if (image.complete && image.naturalWidth) light.sample(image); else image.addEventListener("load", () => { if (images[index] === image) light.sample(image); }, { once: true });
+    prev.hidden = index === 0;
+    marker.show(index + 1);
+  }
+  const by = (delta) => { moved = true; go(index + delta, delta > 0 ? "next" : "previous"); };
+  prev.onclick = () => by(-1);
+  next.onclick = () => by(1);
+  for (const button of [prev, next]) {
+    // On a focused arrow the arrow keys turn the slides, as on the site, not the posts.
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      event.stopPropagation();
+      by(event.key === "ArrowRight" ? 1 : -1);
+    });
+  }
+  go(0, "", false);
+
+  const timer = stillMotion ? 0 : setInterval(() => {
+    const figure = node.closest(".post");
+    if (moved || document.hidden || !figure || figure.classList.contains("leaving") || figure.matches(":hover, :focus-within")) return;
+    go(index + 1, "next");
+  }, SLIDE_EVERY_MS);
+  return {
+    node, controls,
+    /** Moves one slide toward `delta` when there is one that way; false at either end, so the post changes. */
+    move(delta) {
+      if (delta > 0 ? index === total - 1 : index === 0) return false;
+      by(delta);
+      return true;
+    },
+    stop() { clearInterval(timer); },
+  };
+}
+
+/**
+ * The site's carousel progress marker as the wall draws it on a picture (media-carousel.tsx
+ * CarouselProgress): 6px dots 2px apart and an 18px pill for the current image, all 85% white with a
+ * 55% black edge; past seven images seven dots follow the current one, and an end dot shrinks while
+ * more lie beyond it.
+ */
+function slideMarker(total) {
+  const visible = Math.min(total, 7), dot = 6, gap = 2, pill = 18, step = dot + gap, expansion = pill - dot;
+  const dots = Array.from({ length: visible }, () => el("span", { className: "slide-dot" }, [el("span")]));
+  const active = el("span", { className: "slide-dot active" }, [el("span")]);
+  const node = el("span", { className: "slide-marker", role: "progressbar", ariaLabel: "Carousel position" },
+    [el("span", { className: "slide-dots", ariaHidden: "true" }, [...dots, active])]);
+  node.style.width = `${visible * step - gap + expansion}px`;
+  return {
+    node,
+    show(position) {
+      const first = Math.min(Math.max(0, position - 1 - Math.floor(visible / 2)), total - visible), slot = position - first;
+      dots.forEach((item, offset) => {
+        const more = (offset === 0 && first > 0) || (offset === visible - 1 && first + offset < total - 1);
+        item.style.transform = `translateX(${offset * step + (offset + 1 > slot ? expansion : 0)}px)`;
+        item.style.opacity = offset + 1 === slot ? "0" : "1";
+        item.firstChild.style.scale = more ? "0.6" : "1";
+      });
+      active.style.transform = `translateX(${(slot - 1) * step}px)`;
+      Object.assign(node, { ariaValueMin: "1", ariaValueMax: String(total), ariaValueNow: String(position), ariaValueText: `Image ${position} of ${total}` });
+    },
+  };
 }
 
 /**
@@ -514,7 +638,7 @@ function progressMarker() {
 function settingsPanel() {
   // The site's preference switch (src/components/ui/switch.tsx), its label on the left.
   const week = el("input", { type: "checkbox", role: "switch", className: "switch" });
-  week.onchange = () => { storage.write(WEEK_KEY, week.checked); regroup(); };
+  week.onchange = () => { storage.write(WEEK_KEY, week.checked); regroup(); refill(); };
   // Explorations swaps the picks for the Explorations wall; the week's picks then don't apply.
   const explorations = el("input", { type: "checkbox", role: "switch", className: "switch" });
   explorations.onchange = () => {
@@ -663,11 +787,11 @@ function render(posts, index, enter = "open") {
     const rest = current.posts.filter((_, i) => i !== current.index);
     if (rest.length) render(rest, current.index % rest.length, enter); else renderEmpty();
   });
-  current = { posts, index, light, stop: shown.stop };
+  current = { posts, index, light, stop: shown.stop, slides: shown.move ? shown : null };
   const name = [post.title, creditLine(post), dayLabel(post.postedAt)].filter(Boolean).join(", ");
   const link = el("a", { className: "frame", href: withCampaign(post.post), ariaLabel: name }, [light.node, shown.node]);
   link.addEventListener("click", depart);
-  const figure = el("figure", { className: "post" }, [link, ...overlay(post)]);
+  const figure = el("figure", { className: "post" }, [link, ...overlay(post), ...(shown.controls ? [shown.controls] : [])]);
   figure.dataset.enter = enter;
   // The post before softens out under the new one, its video still playing, while its light hands over;
   // a quick second step ends that at once.
@@ -708,9 +832,15 @@ function changeFeed() {
     feedEntries = entries;
     feedSource = source;
     render(posts, 0, "next");
+    refill();
   };
   if (kept) swap(kept.entries);
   if (!kept || Date.now() - (kept.fetchedAt ?? 0) > REFRESH_MS) readFeed(source).then((entries) => { if (!kept) swap(entries); }, () => {});
+}
+
+/** Picks short of six after a switch: once their top-up feeds are read, the set grows to six. */
+function refill() {
+  if (feedSource === "picks") topUp(feedEntries).then(() => { if (feedSource === "picks") regroup(); });
 }
 
 /** After This week's picks changes: the post on screen stays when it is in the new set, else its newest comes. */
@@ -721,6 +851,12 @@ function regroup() {
   if (index < 0) { render(posts, 0, "next"); return; }
   Object.assign(current, { posts, index });
   place(posts, index);
+}
+
+/** A swipe: over a carousel it moves the slides while there are more that way, else it changes the post. */
+function turn(delta, target) {
+  if (target?.closest?.(".post:not(.leaving)") && current?.slides?.move(delta)) return;
+  step(delta);
 }
 
 function step(delta) {
@@ -744,7 +880,7 @@ document.addEventListener("keydown", (event) => {
  * Swipes step like the arrows (owner, 2026-11-12), one post per swipe: left for the next post, right for
  * the one before. On a trackpad a two-finger swipe arrives as horizontal scrolling, and the momentum
  * after the fingers lift is still the same swipe; a new one starts after a pause, or when the push grows
- * again once that momentum has nearly faded. Chrome's own swipe back is off (newtab.css), so it never
+ * again once that momentum has nearly faded. Over a carousel it turns the slides first (turn). Chrome's own swipe back is off (newtab.css), so it never
  * leaves the page. A swipe inside Settings is left alone.
  */
 const SWIPE_PX = 40, SWIPE_QUIET_MS = 200;
@@ -764,21 +900,21 @@ window.addEventListener("wheel", (event) => {
   swipe.sum += dx;
   if (Math.abs(swipe.sum) < SWIPE_PX) return;
   Object.assign(swipe, { done: true, stepped: now });
-  step(swipe.sum > 0 ? 1 : -1);
+  turn(swipe.sum > 0 ? 1 : -1, event.target);
 }, { passive: false });
 
 // On a touchscreen, one finger swiped across the page; the tap that ends a swipe doesn't open the post.
 let touch = null, swipedAt = -Infinity;
 app.addEventListener("pointerdown", (event) => {
-  if (event.pointerType === "touch" && event.isPrimary && !event.target.closest(".panel")) touch = { x: event.clientX, y: event.clientY, id: event.pointerId };
+  if (event.pointerType === "touch" && event.isPrimary && !event.target.closest(".panel")) touch = { x: event.clientX, y: event.clientY, id: event.pointerId, target: event.target };
 });
 app.addEventListener("pointerup", (event) => {
   if (touch?.id !== event.pointerId) return;
-  const dx = event.clientX - touch.x, dy = event.clientY - touch.y;
+  const dx = event.clientX - touch.x, dy = event.clientY - touch.y, from = touch;
   touch = null;
   if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
   swipedAt = event.timeStamp;
-  step(dx < 0 ? 1 : -1);
+  turn(dx < 0 ? 1 : -1, from.target);
 });
 app.addEventListener("pointercancel", () => { touch = null; });
 app.addEventListener("click", (event) => {
@@ -831,11 +967,23 @@ function show(entries, source) {
   return true;
 }
 
+const stale = (copy) => !copy || Date.now() - (copy.fetchedAt ?? 0) > REFRESH_MS;
+
+/** Picks short of six: the feeds that top them up, read when their kept copy is missing or over an hour old. */
+function topUp(entries) {
+  if (picked(entries).length >= MIN_POSTS) return Promise.resolve();
+  return Promise.all(["explorations", "latest"].map((source) => stale(keptFeed(source)) ? readFeed(source).catch(() => null) : null));
+}
+
 const source = feedMode(), kept = keptFeed(source);
 const shownFromCache = Boolean(kept) && show(kept.entries, source);
-if (!shownFromCache || Date.now() - (kept?.fetchedAt ?? 0) > REFRESH_MS) {
-  // A kept copy is never swapped under the reader; the fresh feed is used from the next tab.
+// Kept picks short of six top up from the next tab.
+if (shownFromCache && source === "picks") topUp(kept.entries);
+if (!shownFromCache || stale(kept)) {
+  // A kept copy is never swapped under the reader; the fresh feed is used from the next tab. A first
+  // tab waits for the top-up feeds it needs, so it opens on six posts.
   readFeed(source)
+    .then((entries) => source === "picks" ? topUp(entries).then(() => entries) : entries)
     .then((entries) => { if (!shownFromCache && !show(entries, source)) renderEmpty(); })
     .catch(() => { if (!shownFromCache) renderEmpty(); });
 }
