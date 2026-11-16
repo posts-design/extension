@@ -7,12 +7,12 @@ hours (or the last 7 days, with **This week's picks** on in Settings), and never
 when there are fewer picks, the newest Explorations of the last 2 days fill in, then the newest posts on
 posts.design. With **Explorations** on in Settings, it features posts.design's
 Explorations instead, independent designers' posts: the last 2 days', and at least the 6 newest. Each new tab opens on the post after the one you saw last, so tabs take
-turns through them; a newly published post comes first. Hover either side of the screen for an
-arrow, swipe sideways with two fingers on a trackpad (or one on a touchscreen), or click the page
+turns through them; a newly published post comes first. Beside the post, the pointer becomes an
+arrow: click either side to step, swipe sideways with two fingers on a trackpad (or one on a touchscreen), or click the page
 and use the ← and → keys, to go back through them. Videos play muted on a
 loop; with reduced motion or Chrome's Data Saver turned on, they show their still and the light stays
 put. A carousel post pages through its images as on posts.design's wall: point at it for its arrows,
-or swipe over it, and it turns by itself every 8 seconds until you do.
+drag it with the mouse or swipe over it, and it turns by itself every 8 seconds until you do.
 
 Point at the post to see who posted it and when, as on posts.design's wall. When a person posted it
 for a brand, the brand's avatar shows with theirs beside it. Click the post to open its page on
@@ -50,7 +50,8 @@ Remove it from `chrome://extensions` to get Chrome's own new tab back.
 - It reads public files from posts.design: `feed/new-tab.xml` (the picks), `feed/explorations.xml`
   (with Explorations on, or to fill in when there are fewer than six picks) and `feed.xml` (the newest
   posts, when both are short). It keeps a copy of each in the page's local storage, so a new tab never
-  waits for the network, and reads each at most once an hour. Beside it, it keeps the address of the post you saw last, so the next tab opens on
+  waits for the network, and reads each at most once an hour (at once after an update that reads
+  something new from the feeds). Beside it, it keeps the address of the post you saw last, so the next tab opens on
   the one after, and your theme, Explorations and This week's picks if you chose them in Settings.
 - Posts, videos and avatars load from posts.design. With Data Saver on, only the post on screen loads,
   and a video post stays on its still.
@@ -76,8 +77,8 @@ every post: the newest 50 with
 [Media RSS](https://www.rssboard.org/media-rss) pictures and videos. Its own fields, in the
 `https://posts.design/ns/feed` namespace, give the title without the account's name, the account that
 posted it (`handle`, `kind` brand or person, `avatar`, and a brand's `page`), the brand a person posted it for (`brand`:
-`name`, `avatar`, `page`), when it went out (`postedAt`) and a carousel's images in order (`slide`:
-`url`, `width`, `height`).
+`name`, `avatar`, `page`), when it went out (`postedAt`), a carousel's images in order (`slide`:
+`url`, `width`, `height`) and a video's opening frame (`still`: `url`), shown until it plays.
 
 ## Licence
 

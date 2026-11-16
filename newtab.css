@@ -142,7 +142,9 @@ a { color: inherit; text-decoration: none; }
    from it, on the page's colour; the incoming slide settles 10px in the direction of travel. */
 .picture.slides { overflow: hidden; background: var(--background); }
 .slide-track { display: flex; gap: 8px; height: 100%; transition: transform 420ms var(--ease-out); }
-.slide-track.jump { transition: none; }
+.slide-track.jump, .slides.dragging .slide-track { transition: none; }
+.slides.dragging { cursor: grabbing; }
+.slide-image { user-select: none; }
 .slide { flex: 0 0 100%; height: 100%; overflow: hidden; border-radius: var(--radius-media); }
 .slide-image { display: block; width: 100%; height: 100%; object-fit: cover; }
 .slide-image.whole { object-fit: contain; }
@@ -166,6 +168,9 @@ a { color: inherit; text-decoration: none; }
 .slide-arrow.next { right: 12px; }
 .slide-arrow.prev svg { transform: rotate(180deg); }
 .post:not(.leaving):hover .slide-arrow, .slide-arrow:focus-visible { opacity: 1; }
+/* A post leaving stays in its cell while its picture softens out; its marker goes with the picture, never
+   over the post coming in. */
+.post.leaving .slide-controls { opacity: 0; transition: opacity 200ms var(--ease-soft); }
 .slide-controls:has(.slide-arrow:hover) .slide-arrow:not(:hover) { opacity: 0; }
 .slide-arrow:focus-visible { outline: none; box-shadow: 0 0 0 2px rgb(255 255 255 / 0.9), 0 0 0 3.5px rgb(0 0 0 / 0.4); }
 .slide-marker { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; height: 36px; max-width: 40%; }
@@ -306,11 +311,12 @@ a { color: inherit; text-decoration: none; }
 .dot { display: block; width: 100%; height: 100%; border-radius: 9999px; background: var(--foreground); opacity: 0.35; }
 .slot.active .dot { opacity: 0.9; }
 
-/* Side arrows: the site's carousel arrow (media-carousel, .ui-media-badge), shown when the pointer
-   reaches either side of the screen. The whole side is the target; the frosted disc is the sign.
-   The disc's colours are the badge's fixed over-media values, not theme tokens. */
+/* Side arrows: the site's carousel arrow (media-carousel, .ui-media-badge). Each side reaches from the
+   screen's edge to the picture's; with a mouse the disc is the pointer there (newtab.js followPointer),
+   as the site's close bubble is beside a post's picture. The disc's colours are the badge's fixed
+   over-media values, not theme tokens. */
 .side {
-  position: fixed; top: 0; bottom: 0; z-index: 2; width: clamp(72px, var(--gutter, 12vw), 200px);
+  position: fixed; top: 0; bottom: 0; z-index: 2; width: max(72px, var(--gutter, 12vw));
   display: flex; align-items: center; padding: 0 24px; border: 0; background: transparent;
   color: #f5f5f5; cursor: pointer;
 }
@@ -323,6 +329,9 @@ a { color: inherit; text-decoration: none; }
   opacity: 0; transition: opacity 150ms ease-out;
 }
 .side:hover .disc, .side:focus-visible .disc { opacity: 1; backdrop-filter: blur(14px) saturate(1.3); }
+/* Following, the disc grows to the site's 44px cursor bubble and sits centred on the pointer. */
+.side.following { cursor: none; }
+.side.following .disc { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; will-change: transform; }
 .side:focus-visible { outline: none; }
 .side:focus-visible .disc { box-shadow: 0 0 0 2px rgb(255 255 255 / 0.9), 0 0 0 3.5px rgb(0 0 0 / 0.4); }
 .prev svg { transform: rotate(180deg); }

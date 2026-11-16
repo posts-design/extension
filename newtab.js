@@ -32,6 +32,9 @@ const FEEDS = {
   latest: { url: LATEST_URL, key: "posts-design-newtab:feed:latest:v1" },
 };
 const MIN_POSTS = 6;
+// Stamped on each kept feed copy; raise it when parseFeed's output changes, so a copy an older version
+// kept is read again at once instead of shown for up to an hour.
+const FEED_FORMAT = 4;
 const REFRESH_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ATOM_NS = "http://www.w3.org/2005/Atom";
@@ -113,11 +116,13 @@ function parseFeed(text) {
     const carousel = slides.length >= 2 ? slides : null;
     const video = !carousel && content?.getAttribute("type")?.startsWith("video/") ? siteUrl(content.getAttribute("url") ?? "") : null;
     const postedAt = Date.parse(text(POSTS_NS, "postedAt"));
+    // A video's opening frame, shown until it plays so the handover never jumps.
+    const opening = video ? siteUrl(first(POSTS_NS, "still")?.getAttribute("url") ?? "") : "";
     return [{
       post, image: carousel?.[0].src ?? image, published, slides: carousel,
       postedAt: Number.isNaN(postedAt) ? published : postedAt,
       size: (carousel && { width: carousel[0].width, height: carousel[0].height }) || (video && size(content)) || size(thumbnail),
-      video,
+      video, opening: opening || null,
       source: httpsUrl(link("via"))?.href ?? null,
       title: text(POSTS_NS, "title") || text(ATOM_NS, "title"),
       handle: account?.getAttribute("handle") ?? "",
@@ -298,7 +303,7 @@ function fit() {
   )));
   figure.style.width = `${shown}px`;
   current.light.fit(shown, shown * height / width);
-  // The side arrows' targets stop at the picture's edge, so clicking the picture always opens it.
+  // The sides reach the picture's edge, so clicking the picture always opens it and beside it turns.
   app.style.setProperty("--gutter", `${Math.floor((across - shown) / 2)}px`);
 }
 
@@ -455,6 +460,12 @@ function halo(sampled) {
  * post is dropped only when neither its still nor its video loads. No controls sit on it (owner,
  * 2026-11-13): the whole post opens its page, where the site's player is.
  */
+/** Under reduced motion, or with Data Saver on, videos show their still and never play. */
+const stillVideos = () => stillMotion || Boolean(navigator.connection?.saveData);
+
+/** A video that plays waits on its opening frame; one that never plays shows the post's chosen still. */
+const posterOf = (post) => (post.video && !stillVideos() && post.opening) || post.image;
+
 function media(post, light, loaded, failed) {
   if (post.slides) return slideshow(post, light, loaded, failed);
   const label = post.alt || post.title;
@@ -467,13 +478,14 @@ function media(post, light, loaded, failed) {
   }
   // Under reduced motion, or with Data Saver on, it shows its still and never plays, so it downloads
   // nothing more; its page on posts.design plays it.
-  const still = stillMotion || Boolean(navigator.connection?.saveData);
-  const video = el("video", { className: "picture", poster: post.image, muted: true, loop: true, playsInline: true, preload: still ? "none" : "auto", ariaLabel: label });
+  const still = stillVideos();
+  const first = posterOf(post);
+  const video = el("video", { className: "picture", poster: first, muted: true, loop: true, playsInline: true, preload: still ? "none" : "auto", ariaLabel: label });
   video.autoplay = !still;
   const poster = new Image();
   video.still = poster;
   poster.onload = () => { fit(); if (!video.videoWidth) light.sample(poster); loaded(); };
-  poster.src = post.image;
+  poster.src = first;
   video.addEventListener("loadedmetadata", fit);
   video.addEventListener("loadeddata", () => { light.sample(video); loaded(); }, { once: true });
   // A still video never loads, so its still alone decides.
@@ -496,12 +508,13 @@ function media(post, light, loaded, failed) {
  * room as it comes. A two-finger swipe over the post moves through the slides first (`move`).
  */
 const SLIDE_EVERY_MS = 8000, SLIDE_GAP = 8;
+const DRAG_SLOP = 6; // px a press moves before it is a drag, as on the site
 function slideshow(post, light, loaded, failed) {
   const slides = post.slides, total = slides.length, aspect = slides[0].width / slides[0].height;
   const label = post.alt || post.title;
   const images = slides.map((slide, i) => {
     const own = slide.width / slide.height, whole = Math.max(own / aspect, aspect / own) > 1.5;
-    return el("img", { className: `slide-image${whole ? " whole" : ""}`, alt: i ? "" : label, decoding: "async", loading: i < 2 ? "eager" : "lazy", src: slide.src });
+    return el("img", { className: `slide-image${whole ? " whole" : ""}`, alt: i ? "" : label, decoding: "async", loading: i < 2 ? "eager" : "lazy", draggable: false, src: slide.src });
   });
   const frames = images.map((image) => el("span", { className: "slide" }, [image]));
   const track = el("span", { className: "slide-track" }, frames);
@@ -520,7 +533,7 @@ function slideshow(post, light, loaded, failed) {
     index = (to + total) % total;
     // A wrap jumps straight to the far slide, which then settles in as any other does.
     track.classList.toggle("jump", wrap);
-    track.style.transform = `translateX(calc(${-index} * (100% + ${SLIDE_GAP}px)))`;
+    shift();
     node.dataset.direction = direction;
     frames.forEach((frame, i) => frame.classList.toggle("current", i === index));
     // Restart the settle on the new slide.
@@ -533,7 +546,51 @@ function slideshow(post, light, loaded, failed) {
     prev.hidden = index === 0;
     marker.show(index + 1);
   }
+  /** Places the track on the current slide, `offset` pixels along while it is dragged. */
+  function shift(offset = 0) {
+    track.style.transform = `translateX(calc(${-index} * (100% + ${SLIDE_GAP}px) + ${offset}px))`;
+  }
   const by = (delta) => { moved = true; go(index + delta, delta > 0 ? "next" : "previous"); };
+
+  // Click and drag (owner, 2026-11-16): with a mouse the slides follow the pointer, past either end with
+  // resistance. Let go past a fifth of the frame, or with a flick, and the next slide that way settles
+  // in; shorter, they spring back. A press that barely moves still opens the post.
+  let drag = null;
+  node.addEventListener("dragstart", (event) => event.preventDefault());
+  node.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "touch" || event.button !== 0) return;
+    drag = { id: event.pointerId, from: event.clientX, offset: 0, dragging: false, last: { x: event.clientX, t: event.timeStamp }, speed: 0 };
+  });
+  node.addEventListener("pointermove", (event) => {
+    if (drag?.id !== event.pointerId) return;
+    const along = event.clientX - drag.from;
+    if (!drag.dragging) {
+      if (Math.abs(along) < DRAG_SLOP) return;
+      drag.dragging = true;
+      node.setPointerCapture(event.pointerId);
+      node.classList.add("dragging");
+    }
+    const beyond = along > 0 ? index === 0 : index === total - 1;
+    drag.offset = beyond ? along / 3 : along;
+    const elapsed = event.timeStamp - drag.last.t;
+    if (elapsed > 0) drag.speed = (event.clientX - drag.last.x) / elapsed;
+    drag.last = { x: event.clientX, t: event.timeStamp };
+    shift(drag.offset);
+  });
+  const release = (event) => {
+    if (drag?.id !== event.pointerId) return;
+    const { dragging, offset, speed } = drag;
+    drag = null;
+    if (!dragging) return;
+    node.classList.remove("dragging");
+    swipedAt = event.timeStamp; // the click that ends a drag never opens the post, as after a swipe
+    moved = true;
+    const flick = Math.abs(speed) > 0.5 && Math.sign(speed) === Math.sign(offset);
+    const delta = Math.abs(offset) > node.clientWidth / 5 || flick ? -Math.sign(offset) : 0;
+    if (delta && (delta > 0 ? index < total - 1 : index > 0)) by(delta); else shift();
+  };
+  node.addEventListener("pointerup", release);
+  node.addEventListener("pointercancel", release);
   prev.onclick = () => by(-1);
   next.onclick = () => by(1);
   for (const button of [prev, next]) {
@@ -676,6 +733,52 @@ function settingsPanel() {
 }
 
 /**
+ * Over a side the arrow is the pointer (owner, 2026-11-16), as the close bubble is beside a post's
+ * picture on posts.design (detail-back-nav.tsx): the native cursor hides and the disc follows it with
+ * the site's eased spring, snapping to it on entry. Mouse only; touch and keyboard keep it at rest.
+ */
+function followPointer(sides) {
+  const target = { x: 0, y: 0 }, at = { x: 0, y: 0 };
+  let raf = 0, disc = null, box = null, rest = 0;
+  const draw = () => {
+    raf = 0;
+    const follow = stillMotion ? 1 : 0.2;
+    at.x += (target.x - at.x) * follow;
+    at.y += (target.y - at.y) * follow;
+    if (Math.abs(target.x - at.x) < 0.1 && Math.abs(target.y - at.y) < 0.1) Object.assign(at, target);
+    disc.style.transform = `translate3d(${at.x}px, ${at.y}px, 0)`;
+    if (at.x !== target.x || at.y !== target.y) raf = requestAnimationFrame(draw);
+  };
+  for (const side of sides) {
+    const own = side.querySelector(".disc");
+    const place = (event, snap) => {
+      if (event.pointerType !== "mouse") return;
+      const entering = snap || disc !== own;
+      if (entering) {
+        // The side is fixed, so its box is read once per visit rather than on every move.
+        clearTimeout(rest);
+        for (const other of sides) if (other !== side) settle(other);
+        side.classList.add("following");
+        disc = own;
+        box = side.getBoundingClientRect();
+      }
+      Object.assign(target, { x: event.clientX - box.left, y: event.clientY - box.top });
+      if (entering) Object.assign(at, target);
+      if (!raf) raf = requestAnimationFrame(draw);
+    };
+    side.addEventListener("pointerenter", (event) => place(event, true));
+    side.addEventListener("pointermove", (event) => place(event, false));
+    // The disc fades out where the pointer left it, then returns to rest for the keyboard.
+    side.addEventListener("pointerleave", () => { rest = setTimeout(() => settle(side), 200); });
+  }
+  function settle(side) {
+    side.classList.remove("following");
+    side.querySelector(".disc").style.transform = "";
+    if (disc === side.querySelector(".disc")) disc = null;
+  }
+}
+
+/**
  * The top bar, the progress marker and the side arrows. Built once, so the progress pill slides between
  * posts. Top right, Copy for agent and Settings rest faint and light up when the pointer nears the top.
  */
@@ -696,6 +799,7 @@ function buildShell() {
     // Names the post an arrow brought, for screen readers; the opening post is simply there.
     status: el("span", { className: "visually-hidden", role: "status" }),
   };
+  followPointer([parts.prev, parts.next]);
   parts.copy.onclick = () => copyForAgent(parts.copy);
   parts.settings.popoverTargetElement = parts.panel;
   app.replaceChildren(el("header", { className: "top" }, [parts.copy, parts.settings, parts.panel]), parts.progress.node, parts.prev, parts.next, parts.status);
@@ -713,7 +817,7 @@ function warmNeighbours(posts, index) {
   if (posts.length < 2 || navigator.connection?.saveData) return;
   for (const delta of [1, -1]) {
     const post = posts[(index + delta + posts.length) % posts.length];
-    for (const src of [post.image, post.avatar, post.brand?.avatar]) {
+    for (const src of [posterOf(post), post.avatar, post.brand?.avatar]) {
       if (!src || warmed.has(src)) continue;
       const image = new Image();
       image.decoding = "async";
@@ -825,7 +929,7 @@ function place(posts, index) {
  * again for the next tab.
  */
 function changeFeed() {
-  const source = feedMode(), kept = keptFeed(source);
+  const source = feedMode(), kept = usable(keptFeed(source));
   const swap = (entries) => {
     const posts = featured(entries, source);
     if (feedMode() !== source || !posts.length) return;
@@ -835,7 +939,7 @@ function changeFeed() {
     refill();
   };
   if (kept) swap(kept.entries);
-  if (!kept || Date.now() - (kept.fetchedAt ?? 0) > REFRESH_MS) readFeed(source).then((entries) => { if (!kept) swap(entries); }, () => {});
+  if (stale(kept)) readFeed(source).then((entries) => { if (!kept) swap(entries); }, () => { if (!kept) swap(keptFeed(source)?.entries ?? []); });
 }
 
 /** Picks short of six after a switch: once their top-up feeds are read, the set grows to six. */
@@ -940,20 +1044,26 @@ function opening(posts, seen) {
   return last < 0 ? 0 : (last + 1) % posts.length;
 }
 
-/** A feed's kept copy, { fetchedAt, entries }, or null. */
+/** A feed's kept copy, { format, fetchedAt, entries }, or null. */
 function keptFeed(source) {
   const kept = storage.read(FEEDS[source].key);
   return Array.isArray(kept?.entries) ? kept : null;
 }
 
+/** A kept copy this version can show as it is: one an older version kept waits for the fresh feed. */
+const usable = (copy) => copy?.format === FEED_FORMAT ? copy : null;
+
 /** Reads a feed and keeps it. */
 function readFeed(source) {
   const { url, key } = FEEDS[source];
-  return fetch(url, { credentials: "omit" })
+  // The feeds let a browser serve its last copy while it fetches the next in the background, which would
+  // leave every read a read behind; "no-cache" asks posts.design each time, which answers in full only
+  // when the feed changed.
+  return fetch(url, { credentials: "omit", cache: "no-cache" })
     .then((response) => { if (!response.ok) throw new Error(`Feed ${response.status}`); return response.text(); })
     .then((text) => {
       const entries = parseFeed(text);
-      storage.write(key, { fetchedAt: Date.now(), entries });
+      storage.write(key, { format: FEED_FORMAT, fetchedAt: Date.now(), entries });
       return entries;
     });
 }
@@ -967,7 +1077,7 @@ function show(entries, source) {
   return true;
 }
 
-const stale = (copy) => !copy || Date.now() - (copy.fetchedAt ?? 0) > REFRESH_MS;
+const stale = (copy) => !usable(copy) || Date.now() - copy.fetchedAt > REFRESH_MS;
 
 /** Picks short of six: the feeds that top them up, read when their kept copy is missing or over an hour old. */
 function topUp(entries) {
@@ -975,7 +1085,7 @@ function topUp(entries) {
   return Promise.all(["explorations", "latest"].map((source) => stale(keptFeed(source)) ? readFeed(source).catch(() => null) : null));
 }
 
-const source = feedMode(), kept = keptFeed(source);
+const source = feedMode(), kept = usable(keptFeed(source));
 const shownFromCache = Boolean(kept) && show(kept.entries, source);
 // Kept picks short of six top up from the next tab.
 if (shownFromCache && source === "picks") topUp(kept.entries);
@@ -985,5 +1095,6 @@ if (!shownFromCache || stale(kept)) {
   readFeed(source)
     .then((entries) => source === "picks" ? topUp(entries).then(() => entries) : entries)
     .then((entries) => { if (!shownFromCache && !show(entries, source)) renderEmpty(); })
-    .catch(() => { if (!shownFromCache) renderEmpty(); });
+    // Offline, a copy an older version kept is still better than nothing.
+    .catch(() => { if (!shownFromCache && !show(keptFeed(source)?.entries ?? [], source)) renderEmpty(); });
 }
