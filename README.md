@@ -35,7 +35,7 @@ It follows your system's light or dark mode unless you choose one in Settings.
 
 ## Install
 
-From the Chrome Web Store, or from this folder:
+From the [Chrome Web Store](https://chromewebstore.google.com/detail/ifaedhfopgmopmbnnnnikmokimaldfbo), or from this folder:
 
 1. Download or clone this repository.
 2. In Chrome, open `chrome://extensions`, turn on **Developer mode** and select **Load unpacked**.

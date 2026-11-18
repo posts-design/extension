@@ -739,7 +739,8 @@ function settingsPanel() {
  */
 function followPointer(sides) {
   const target = { x: 0, y: 0 }, at = { x: 0, y: 0 };
-  let raf = 0, disc = null, box = null, rest = 0;
+  let raf = 0, disc = null, box = null, rest = 0, active = null;
+  const pointer = { x: 0, y: 0 };
   const draw = () => {
     raf = 0;
     const follow = stillMotion ? 1 : 0.2;
@@ -755,14 +756,16 @@ function followPointer(sides) {
       if (event.pointerType !== "mouse") return;
       const entering = snap || disc !== own;
       if (entering) {
-        // The side is fixed, so its box is read once per visit rather than on every move.
+        // Its box is read once per visit rather than on every move; a new post's width moves it (below).
         clearTimeout(rest);
         for (const other of sides) if (other !== side) settle(other);
         side.classList.add("following");
         disc = own;
+        active = side;
         box = side.getBoundingClientRect();
       }
-      Object.assign(target, { x: event.clientX - box.left, y: event.clientY - box.top });
+      Object.assign(pointer, { x: event.clientX, y: event.clientY });
+      Object.assign(target, { x: pointer.x - box.left, y: pointer.y - box.top });
       if (entering) Object.assign(at, target);
       if (!raf) raf = requestAnimationFrame(draw);
     };
@@ -771,10 +774,20 @@ function followPointer(sides) {
     // The disc fades out where the pointer left it, then returns to rest for the keyboard.
     side.addEventListener("pointerleave", () => { rest = setTimeout(() => settle(side), 200); });
   }
+  // A side reaches the picture's edge, so a post of another width moves the right side's left edge
+  // under a still pointer: re-read its box and keep the disc where the pointer is.
+  const resized = new ResizeObserver(() => {
+    if (!active || !disc) return;
+    box = active.getBoundingClientRect();
+    Object.assign(target, { x: pointer.x - box.left, y: pointer.y - box.top });
+    Object.assign(at, target);
+    if (!raf) raf = requestAnimationFrame(draw);
+  });
+  for (const side of sides) resized.observe(side);
   function settle(side) {
     side.classList.remove("following");
     side.querySelector(".disc").style.transform = "";
-    if (disc === side.querySelector(".disc")) disc = null;
+    if (disc === side.querySelector(".disc")) { disc = null; active = null; }
   }
 }
 
