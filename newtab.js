@@ -34,7 +34,7 @@ const FEEDS = {
 const MIN_POSTS = 6;
 // Stamped on each kept feed copy; raise it when parseFeed's output changes, so a copy an older version
 // kept is read again at once instead of shown for up to an hour.
-const FEED_FORMAT = 4;
+const FEED_FORMAT = 5;
 const REFRESH_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ATOM_NS = "http://www.w3.org/2005/Atom";
@@ -109,9 +109,10 @@ function parseFeed(text) {
     const published = Date.parse(text(ATOM_NS, "published"));
     if (!post || !image || Number.isNaN(published)) return [];
     // A carousel's slides (2 or more), as the wall's carousel shows them: the first is its still and shape.
+    // A video slide also names the video that plays over its still.
     const slides = [...entry.getElementsByTagNameNS(POSTS_NS, "slide")].flatMap((node) => {
       const src = siteUrl(node.getAttribute("url") ?? ""), dims = size(node);
-      return src && dims ? [{ src, ...dims }] : [];
+      return src && dims ? [{ src, ...dims, video: siteUrl(node.getAttribute("video") ?? "") || null }] : [];
     });
     const carousel = slides.length >= 2 ? slides : null;
     const video = !carousel && content?.getAttribute("type")?.startsWith("video/") ? siteUrl(content.getAttribute("url") ?? "") : null;
@@ -505,7 +506,9 @@ function media(post, light, loaded, failed) {
  * one hides the other) and its progress marker bottom right. It loops, the incoming slide settles in
  * the direction of travel, and it turns by itself every 8 seconds until someone moves it, never while
  * the pointer or focus is on the post, the tab is hidden, or motion is reduced. Each slide lights the
- * room as it comes. A two-finger swipe over the post moves through the slides first (`move`).
+ * room as it comes. A two-finger swipe over the post moves through the slides first (`move`). A video
+ * slide plays muted on a loop over its still while it is the one shown, as on the wall (owner,
+ * 2026-11-25); it loads when it first comes, and never under reduced motion or with Data Saver on.
  */
 const SLIDE_EVERY_MS = 8000, SLIDE_GAP = 8;
 const DRAG_SLOP = 6; // px a press moves before it is a drag, as on the site
@@ -516,7 +519,11 @@ function slideshow(post, light, loaded, failed) {
     const own = slide.width / slide.height, whole = Math.max(own / aspect, aspect / own) > 1.5;
     return el("img", { className: `slide-image${whole ? " whole" : ""}`, alt: i ? "" : label, decoding: "async", loading: i < 2 ? "eager" : "lazy", draggable: false, src: slide.src });
   });
-  const frames = images.map((image) => el("span", { className: "slide" }, [image]));
+  const playable = !stillVideos();
+  const videos = slides.map((slide, i) => slide.video && playable
+    ? el("video", { className: `${images[i].className} slide-video`, muted: true, loop: true, playsInline: true, preload: "none", ariaHidden: "true" })
+    : null);
+  const frames = images.map((image, i) => el("span", { className: "slide" }, videos[i] ? [image, videos[i]] : [image]));
   const track = el("span", { className: "slide-track" }, frames);
   const node = el("span", { className: "picture slides" }, [track]);
   node.style.aspectRatio = `${slides[0].width} / ${slides[0].height}`;
@@ -536,11 +543,19 @@ function slideshow(post, light, loaded, failed) {
     shift();
     node.dataset.direction = direction;
     frames.forEach((frame, i) => frame.classList.toggle("current", i === index));
+    // Only the slide shown plays; a refused play (the post already leaving) leaves its still showing.
+    videos.forEach((other, i) => { if (other && i !== index) other.pause(); });
+    const image = images[index], video = videos[index];
+    if (video) {
+      if (!video.src) video.src = slides[index].video;
+      video.play().catch(() => {});
+    }
     // Restart the settle on the new slide.
-    const image = images[index];
-    image.style.animation = "none";
-    void image.offsetWidth;
-    image.style.animation = "";
+    for (const layer of video ? [image, video] : [image]) {
+      layer.style.animation = "none";
+      void layer.offsetWidth;
+      layer.style.animation = "";
+    }
     if (!lights) { /* The first slide lights the room as the post opens (its onload). */ }
     else if (image.complete && image.naturalWidth) light.sample(image); else image.addEventListener("load", () => { if (images[index] === image) light.sample(image); }, { once: true });
     prev.hidden = index === 0;
@@ -609,6 +624,11 @@ function slideshow(post, light, loaded, failed) {
     if (moved || document.hidden || !figure || figure.classList.contains("leaving") || figure.matches(":hover, :focus-within")) return;
     go(index + 1, "next");
   }, SLIDE_EVERY_MS);
+  // A playing video slide lights the room as a video post does.
+  const sampler = videos.some(Boolean) ? setInterval(() => {
+    const video = videos[index];
+    if (video && !video.paused && video.readyState >= 2) light.sample(video);
+  }, SAMPLE_EVERY_MS) : 0;
   return {
     node, controls,
     /** Moves one slide toward `delta` when there is one that way; false at either end, so the post changes. */
@@ -617,7 +637,11 @@ function slideshow(post, light, loaded, failed) {
       by(delta);
       return true;
     },
-    stop() { clearInterval(timer); },
+    stop() {
+      clearInterval(timer);
+      clearInterval(sampler);
+      for (const video of videos) if (video?.src) { video.removeAttribute("src"); video.load(); }
+    },
   };
 }
 

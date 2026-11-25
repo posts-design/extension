@@ -12,7 +12,8 @@ arrow: click either side to step, swipe sideways with two fingers on a trackpad 
 and use the ← and → keys, to go back through them. Videos play muted on a
 loop; with reduced motion or Chrome's Data Saver turned on, they show their still and the light stays
 put. A carousel post pages through its images as on posts.design's wall: point at it for its arrows,
-drag it with the mouse or swipe over it, and it turns by itself every 8 seconds until you do.
+drag it with the mouse or swipe over it, and it turns by itself every 8 seconds until you do. A video
+in a carousel plays while its slide is showing.
 
 Point at the post to see who posted it and when, as on posts.design's wall. When a person posted it
 for a brand, the brand's avatar shows with theirs beside it. Click the post to open its page on
@@ -78,7 +79,7 @@ every post: the newest 50 with
 `https://posts.design/ns/feed` namespace, give the title without the account's name, the account that
 posted it (`handle`, `kind` brand or person, `avatar`, and a brand's `page`), the brand a person posted it for (`brand`:
 `name`, `avatar`, `page`), when it went out (`postedAt`), a carousel's images in order (`slide`:
-`url`, `width`, `height`) and a video's opening frame (`still`: `url`), shown until it plays.
+`url`, `width`, `height`, and `video` for a slide that plays one) and a video's opening frame (`still`: `url`), shown until it plays.
 
 ## Licence
 

@@ -145,7 +145,8 @@ a { color: inherit; text-decoration: none; }
 .slide-track.jump, .slides.dragging .slide-track { transition: none; }
 .slides.dragging { cursor: grabbing; }
 .slide-image { user-select: none; }
-.slide { flex: 0 0 100%; height: 100%; overflow: hidden; border-radius: var(--radius-media); }
+.slide { position: relative; flex: 0 0 100%; height: 100%; overflow: hidden; border-radius: var(--radius-media); }
+.slide-video { position: absolute; inset: 0; pointer-events: none; }
 .slide-image { display: block; width: 100%; height: 100%; object-fit: cover; }
 .slide-image.whole { object-fit: contain; }
 @media (prefers-reduced-motion: no-preference) {
