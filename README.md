@@ -50,9 +50,9 @@ Remove it from `chrome://extensions` to get Chrome's own new tab back.
   when opening a new tab.
 - It reads public files from posts.design: `feed/new-tab.xml` (the picks), `feed/explorations.xml`
   (with Explorations on, or to fill in when there are fewer than six picks) and `feed.xml` (the newest
-  posts, when both are short). It keeps a copy of each in the page's local storage, so a new tab never
-  waits for the network, and reads each at most once an hour (at once after an update that reads
-  something new from the feeds). Beside it, it keeps the address of the post you saw last, so the next tab opens on
+  posts, when both are short). It keeps a copy of each in the page's local storage, so a new tab opens
+  without a connection, and reads each again when its copy is over five minutes old, holding the tab for
+  at most about a second. Beside it, it keeps the address of the post you saw last, so the next tab opens on
   the one after, and your theme, Explorations and This week's picks if you chose them in Settings.
 - Posts, videos and avatars load from posts.design. With Data Saver on, only the post on screen loads,
   and a video post stays on its still.

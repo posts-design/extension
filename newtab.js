@@ -2,7 +2,7 @@
 
 // The posts.design picks (owner, 2026-11-14): every post chosen on /curate for socials or the email,
 // from any of the site's feeds, newest 50 first by when they were picked, in the public feed's format.
-// A choice shows within minutes; the page reads it at most once an hour.
+// A choice shows within minutes: a tab opened over five minutes after the last read reads again first.
 const FEED_URL = "https://posts.design/feed/new-tab.xml";
 // The Explorations wall, independent designers' posts newest first, for Settings' Explorations switch
 // (owner, 2026-11-14), read and kept the same way.
@@ -33,9 +33,13 @@ const FEEDS = {
 };
 const MIN_POSTS = 6;
 // Stamped on each kept feed copy; raise it when parseFeed's output changes, so a copy an older version
-// kept is read again at once instead of shown for up to an hour.
+// kept is read again at once instead of shown as it is.
 const FEED_FORMAT = 5;
-const REFRESH_MS = 60 * 60 * 1000;
+// How long a kept feed counts as current, the time posts.design itself keeps a feed (owner, 2026-11-27:
+// an hour left new tabs on an older set until a reload).
+const REFRESH_MS = 5 * 60 * 1000;
+// The longest a tab holds its kept posts back for the fresh feed; an unchanged feed answers in about 0.1s.
+const FRESH_WAIT_MS = 1200;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ATOM_NS = "http://www.w3.org/2005/Atom";
 const MEDIA_NS = "http://search.yahoo.com/mrss/";
@@ -962,8 +966,8 @@ function place(posts, index) {
 
 /**
  * After Explorations changes: the other feed's posts from their newest, from its kept copy, or read now
- * when there is none (a failed read leaves the posts on screen). A kept copy over an hour old is read
- * again for the next tab.
+ * when there is none (a failed read leaves the posts on screen). A kept copy over five minutes old is
+ * read again for the next tab.
  */
 function changeFeed() {
   const source = feedMode(), kept = usable(keptFeed(source));
@@ -1116,22 +1120,28 @@ function show(entries, source) {
 
 const stale = (copy) => !usable(copy) || Date.now() - copy.fetchedAt > REFRESH_MS;
 
-/** Picks short of six: the feeds that top them up, read when their kept copy is missing or over an hour old. */
+/** Picks short of six: the feeds that top them up, read when their kept copy is missing or over five minutes old. */
 function topUp(entries) {
   if (picked(entries).length >= MIN_POSTS) return Promise.resolve();
   return Promise.all(["explorations", "latest"].map((source) => stale(keptFeed(source)) ? readFeed(source).catch(() => null) : null));
 }
 
 const source = feedMode(), kept = usable(keptFeed(source));
-const shownFromCache = Boolean(kept) && show(kept.entries, source);
-// Kept picks short of six top up from the next tab.
-if (shownFromCache && source === "picks") topUp(kept.entries);
-if (!shownFromCache || stale(kept)) {
-  // A kept copy is never swapped under the reader; the fresh feed is used from the next tab. A first
-  // tab waits for the top-up feeds it needs, so it opens on six posts.
+if (!stale(kept) && show(kept.entries, source)) {
+  // Kept picks short of six top up from the next tab.
+  if (source === "picks") topUp(kept.entries);
+} else {
+  // An older copy waits a moment for the fresh feed, so a tab opens on the newest posts, and is shown
+  // as it is when the network is slow or away; posts on screen are never swapped under the reader. A
+  // first tab waits for the top-up feeds it needs, so it opens on six posts.
+  let shown = false;
+  const wait = kept ? setTimeout(() => { shown = show(kept.entries, source); }, FRESH_WAIT_MS) : undefined;
   readFeed(source)
     .then((entries) => source === "picks" ? topUp(entries).then(() => entries) : entries)
-    .then((entries) => { if (!shownFromCache && !show(entries, source)) renderEmpty(); })
     // Offline, a copy an older version kept is still better than nothing.
-    .catch(() => { if (!shownFromCache && !show(keptFeed(source)?.entries ?? [], source)) renderEmpty(); });
+    .catch(() => keptFeed(source)?.entries ?? [])
+    .then((entries) => {
+      clearTimeout(wait);
+      if (!shown && !show(entries, source)) renderEmpty();
+    });
 }
